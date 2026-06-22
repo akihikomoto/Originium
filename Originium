@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Originium Arts – Particle Demo</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0c;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: 'Courier New', monospace;
+    overflow: hidden;
+  }
+  canvas {
+    display: block;
+    cursor: none;
+  }
+  #info {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: rgba(255,255,255,0.3);
+    font-size: 12px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="info">เลื่อนเมาส์หรือแตะหน้าจอ</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+let W, H, particles = [], mouse = { x: -9999, y: -9999 };
+
+// ────────── SHAPE: draw text/shape into offscreen canvas ──────────
+function getShapePixels(text, fontSize, w, h) {
+  const off = document.createElement('canvas');
+  off.width = w; off.height = h;
+  const c = off.getContext('2d');
+  c.fillStyle = '#fff';
+  c.font = `900 ${fontSize}px Arial Black, sans-serif`;
+  c.textAlign = 'center';
+  c.textBaseline = 'middle';
+  // Draw a diamond shape like the Originium symbol
+  c.save();
+  c.translate(w / 2, h / 2);
+  // Outer diamond
+  c.beginPath();
+  c.moveTo(0, -h * 0.42);
+  c.lineTo(w * 0.22, 0);
+  c.lineTo(0, h * 0.42);
+  c.lineTo(-w * 0.22, 0);
+  c.closePath();
+  c.fill();
+  // Inner diamond (cutout)
+  c.globalCompositeOperation = 'destination-out';
+  c.beginPath();
+  c.moveTo(0, -h * 0.12);
+  c.lineTo(w * 0.07, 0);
+  c.lineTo(0, h * 0.12);
+  c.lineTo(-w * 0.07, 0);
+  c.closePath();
+  c.fill();
+  c.restore();
+  const data = c.getImageData(0, 0, w, h).data;
+  const pts = [];
+  const gap = 6;
+  for (let y = 0; y < h; y += gap) {
+    for (let x = 0; x < w; x += gap) {
+      if (data[(y * w + x) * 4 + 3] > 128) {
+        pts.push({ x, y });
+      }
+    }
+  }
+  return pts;
+}
+
+// ────────── PARTICLE CLASS ──────────
+class Particle {
+  constructor(ox, oy) {
+    this.ox = ox; // origin x
+    this.oy = oy; // origin y
+    this.x = ox + (Math.random() - 0.5) * W;
+    this.y = oy + (Math.random() - 0.5) * H;
+    this.vx = 0;
+    this.vy = 0;
+    this.size = Math.random() * 1.5 + 0.5;
+    this.brightness = Math.random() * 0.5 + 0.5;
+  }
+
+  update() {
+    const REPEL_RADIUS = 90;
+    const REPEL_STRENGTH = 5.5;
+    const SPRING = 0.08;
+    const FRICTION = 0.82;
+
+    // Spring back to origin
+    this.vx += (this.ox - this.x) * SPRING;
+    this.vy += (this.oy - this.y) * SPRING;
+
+    // Mouse repulsion
+    const dx = this.x - mouse.x;
+    const dy = this.y - mouse.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < REPEL_RADIUS && dist > 0) {
+      const force = (1 - dist / REPEL_RADIUS) * REPEL_STRENGTH;
+      this.vx += (dx / dist) * force * (1 + force * 0.3);
+      this.vy += (dy / dist) * force * (1 + force * 0.3);
+    }
+
+    this.vx *= FRICTION;
+    this.vy *= FRICTION;
+    this.x += this.vx;
+    this.y += this.vy;
+  }
+
+  draw() {
+    const dist = Math.hypot(this.x - mouse.x, this.y - mouse.y);
+    const glow = Math.max(0, 1 - dist / 120);
+    const alpha = 0.4 + this.brightness * 0.6 + glow * 0.4;
+    const r = this.size + glow * 1.2;
+
+    if (glow > 0.05) {
+      // Glowing halo
+      const grad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, r * 3);
+      grad.addColorStop(0, `rgba(180,220,255,${glow * 0.6})`);
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, r * 3, 0, Math.PI * 2);
+      ctx.fillStyle = grad;
+      ctx.fill();
+    }
+
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(220,235,255,${alpha})`;
+    ctx.fill();
+  }
+}
+
+// ────────── INIT ──────────
+function init() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+
+  const size = Math.min(W, H) * 0.85;
+  const offsetX = (W - size) / 2;
+  const offsetY = (H - size) / 2;
+
+  const pts = getShapePixels('', 0, Math.round(size), Math.round(size));
+
+  particles = pts.map(p => new Particle(p.x + offsetX, p.y + offsetY));
+}
+
+// ────────── LOOP ──────────
+function loop() {
+  ctx.clearRect(0, 0, W, H);
+
+  // Subtle vignette
+  const vg = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, Math.max(W,H)*0.7);
+  vg.addColorStop(0, 'rgba(0,0,0,0)');
+  vg.addColorStop(1, 'rgba(0,0,0,0.6)');
+  ctx.fillStyle = vg;
+  ctx.fillRect(0, 0, W, H);
+
+  for (const p of particles) { p.update(); p.draw(); }
+
+  // Custom cursor ring
+  if (mouse.x > 0) {
+    ctx.beginPath();
+    ctx.arc(mouse.x, mouse.y, 40, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(100,180,255,0.25)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(mouse.x, mouse.y, 3, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(100,200,255,0.8)';
+    ctx.fill();
+  }
+
+  requestAnimationFrame(loop);
+}
+
+// ────────── EVENTS ──────────
+window.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
+window.addEventListener('touchmove', e => {
+  e.preventDefault();
+  mouse.x = e.touches[0].clientX;
+  mouse.y = e.touches[0].clientY;
+}, { passive: false });
+window.addEventListener('touchend', () => { mouse.x = -9999; mouse.y = -9999; });
+window.addEventListener('resize', init);
+
+init();
+loop();
+</script>
+</body>
+</html>
